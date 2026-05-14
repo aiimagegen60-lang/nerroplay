@@ -8,8 +8,7 @@ import { SafeStorage } from '../lib/safe-storage';
 import CompatibilityMeter from '../components/CompatibilityMeter';
 import GunaGrid from '../components/GunaGrid';
 import DoshaPanel from '../components/DoshaPanel';
-
-const NerroRelationshipAI = lazy(() => import('../components/NerroRelationshipAI'));
+import NerroRelationshipAI from '../components/NerroRelationshipAI';
 
 // --- Error Boundary for Sections ---
 class SectionErrorBoundary extends React.Component<
@@ -215,9 +214,7 @@ export default function KundliMatchingReport() {
 
       {/* AI Intelligence */}
       <SectionErrorBoundary sectionName="NERRO AI">
-        <Suspense fallback={<div className="h-64 glass animate-pulse" />}>
-          <NerroRelationshipAI input={input} report={report} />
-        </Suspense>
+        <NerroRelationshipAI input={input} report={report} />
       </SectionErrorBoundary>
 
       {/* Remedy Engine */}

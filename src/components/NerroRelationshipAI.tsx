@@ -35,6 +35,14 @@ export default function NerroRelationshipAI({ input, report }: NerroRelationship
       }
       
       const data = await response.json();
+      
+      // Ensure arrays are present to prevent map() errors
+      if (data) {
+        if (!Array.isArray(data.hiddenStrengths)) data.hiddenStrengths = [];
+        if (!Array.isArray(data.growthOpportunities)) data.growthOpportunities = [];
+        if (!data.partnerAdvice) data.partnerAdvice = { forPartner1: '', forPartner2: '' };
+      }
+      
       setAnalysis(data);
     } catch (err: any) {
       console.error(`AI Activation Error (Attempt ${retryCount + 1}):`, err);

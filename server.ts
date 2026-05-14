@@ -1,5 +1,4 @@
 import express from "express";
-import { createServer as createViteServer } from "vite";
 import path from "path";
 import dotenv from "dotenv";
 import helmet from "helmet";
@@ -9,20 +8,12 @@ import Groq from "groq-sdk";
 import { HfInference } from "@huggingface/inference";
 import { createClient } from "@supabase/supabase-js";
 import { ToolHandlers } from "./src/lib/toolHandlers.ts";
-import { GoogleGenerativeAI } from "@google/generative-ai";
 
 dotenv.config();
 
 const PORT = 3000;
 
-// Gemini Setup
-let genAI: GoogleGenerativeAI | null = null;
-function getGeminiClient() {
-  const key = process.env.GEMINI_API_KEY;
-  if (!key || key === 'placeholder') return null;
-  if (!genAI) genAI = new GoogleGenerativeAI(key);
-  return genAI;
-}
+// Removed Gemini Setup as requested
 
 function buildNerroAstroPrompt(ctx: any) {
   return `
@@ -90,6 +81,13 @@ function getHFClient() {
 }
 
 async function syncSupabaseSecrets() {
+  // If keys are already present in environment (e.g. set in Vercel Dashboard), skip sync to save time
+  if (process.env.GROQ_API_KEY && process.env.GROQ_API_KEY !== 'placeholder' && 
+      process.env.HUGGINGFACE_API_KEY && process.env.HUGGINGFACE_API_KEY !== 'placeholder') {
+    console.log("✨ Keys already present in environment, skipping Supabase sync.");
+    return;
+  }
+
   const supabaseUrl = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "").trim();
   const supabaseServiceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim();
 
@@ -348,7 +346,7 @@ function recordModelStatus(model: string, success: boolean) {
       }
     }
 
-    // 4. ULTIMATE FALLBACK: Hugging Face
+    // 3. ULTIMATE FALLBACK: Hugging Face
     const hfClient = getHFClient();
     if (hfClient && isModelStable("hf-fallback")) {
       try {
@@ -528,35 +526,7 @@ function recordModelStatus(model: string, success: boolean) {
       }
     }
 
-    // 4. Gemini (Third Backup)
-    const gemini = getGeminiClient();
-    if (gemini) {
-      try {
-        console.log("🚀 STREAM_LINK: Routing to Gemini Fallback...");
-        const model = gemini.getGenerativeModel({ model: "gemini-2.0-flash" });
-        const chat = model.startChat({
-          history: chatHistory.map(m => ({
-            role: m.role === 'nerro' ? 'model' : 'user',
-            parts: [{ text: m.content }]
-          })),
-          systemInstruction: { role: 'system', parts: [{ text: systemInstruction }] }
-        });
-
-        const result = await chat.sendMessageStream(userMessage);
-        for await (const chunk of result.stream) {
-          const text = chunk.text();
-          res.write(`data: ${JSON.stringify({ text })}\n\n`);
-        }
-        res.write('data: [DONE]\n\n');
-        res.end();
-        return;
-      } catch (e: any) {
-        errors.push(`GeminiStream: ${e.message}`);
-        console.error("Gemini Stream Error:", e);
-      }
-    }
-
-    // 5. Hugging Face (Ultimate Fallback)
+    // 3. Hugging Face (Ultimate Fallback)
     const hfClient = getHFClient();
     if (hfClient) {
       try {
@@ -923,7 +893,8 @@ RETURN STRICT JSON:
   });
 
   // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
+  if (process.env.NODE_ENV !== "production" && !process.env.VERCEL) {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",

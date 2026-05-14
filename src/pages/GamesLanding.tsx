@@ -3,7 +3,7 @@ import { Helmet } from 'react-helmet-async';
 import { motion, AnimatePresence } from 'motion/react';
 import { Gamepad2, Play, Trophy, Cpu, X, Maximize2, Loader2, Plus, Globe, Image as ImageIcon, FileText, Send } from 'lucide-react';
 import { GAMES as STATIC_GAMES } from '../constants';
-import { getSupabase } from '../lib/supabaseClient';
+import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 
 export default function GamesLanding() {
@@ -22,7 +22,6 @@ export default function GamesLanding() {
 
   const fetchGames = async () => {
     try {
-      const supabase = getSupabase();
       const { data, error } = await supabase
         .from('games')
         .select('*')
@@ -49,7 +48,6 @@ export default function GamesLanding() {
 
     setSubmitting(true);
     try {
-      const supabase = getSupabase();
       const { error } = await supabase
         .from('games')
         .insert([{
