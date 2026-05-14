@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import dotenv from "dotenv";
 import helmet from "helmet";
 import cors from "cors";
@@ -84,7 +85,7 @@ async function syncSupabaseSecrets() {
   // If keys are already present in environment (e.g. set in Vercel Dashboard), skip sync to save time
   if (process.env.GROQ_API_KEY && process.env.GROQ_API_KEY !== 'placeholder' && 
       process.env.HUGGINGFACE_API_KEY && process.env.HUGGINGFACE_API_KEY !== 'placeholder') {
-    console.log("✨ Keys already present in environment, skipping Supabase sync.");
+    console.log("✨ Keys already present in environment or Vercel detected, skipping Supabase sync.");
     return;
   }
 
@@ -900,12 +901,14 @@ RETURN STRICT JSON:
       appType: "spa",
     });
     app.use(vite.middlewares);
-  } else {
+  } else if (!process.env.VERCEL) {
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
+    if (fs.existsSync(distPath)) {
+      app.use(express.static(distPath));
+      app.get('*', (req, res) => {
+        res.sendFile(path.join(distPath, 'index.html'));
+      });
+    }
   }
 
   // GLOBAL ERROR HANDLER
