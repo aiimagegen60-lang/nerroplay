@@ -82,102 +82,67 @@ function getHFClient() {
 }
 
 async function syncSupabaseSecrets() {
-  // If keys are already present in environment (e.g. set in Vercel Dashboard), skip sync to save time
-  if (process.env.GROQ_API_KEY && process.env.GROQ_API_KEY !== 'placeholder' && 
-      process.env.HUGGINGFACE_API_KEY && process.env.HUGGINGFACE_API_KEY !== 'placeholder') {
-    console.log("✨ Keys already present in environment or Vercel detected, skipping Supabase sync.");
-    return;
-  }
-
+  console.log("🛠️ Starting Supabase Secret Sync...");
+  
   const supabaseUrl = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "").trim();
   const supabaseServiceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim();
 
-  console.log(`🔍 Supabase Setup: URL=${!!supabaseUrl}, ServiceKey=${!!supabaseServiceKey}`);
+  // Logging detected config (no keys logged)
+  console.log(`📡 Supabase Config detected: URL=${!!supabaseUrl}, ServiceKey=${!!supabaseServiceKey}`);
 
-  if (supabaseUrl && supabaseServiceKey) {
-    secretSyncStats.attempted = true;
-    if (!supabaseUrl.startsWith("http")) {
-      console.error("❌ Invalid Supabase URL format. Must start with http/https. Current value:", supabaseUrl);
+  if (!supabaseUrl || !supabaseServiceKey) {
+    console.warn("⚠️ Supabase credentials missing. Skipping cloud secret sync.");
+    return;
+  }
+
+  try {
+    const sanitizedUrl = supabaseUrl.replace(/\/$/, ""); 
+    const client = createClient(sanitizedUrl, supabaseServiceKey);
+    
+    console.log("🔍 Querying 'secrets' table...");
+    let { data, error } = await client.from('secrets').select('*');
+
+    if (error) {
+      console.error(`❌ Table 'secrets' fetch error: ${error.message}`);
+      console.log("🔄 Trying fallback table 'Secrets'...");
+      const fallback = await client.from('Secrets').select('*');
+      data = fallback.data;
+      error = fallback.error;
+    }
+
+    if (error) {
+      console.error(`❌ Both 'secrets' and 'Secrets' tables failed: ${error.message}`);
       return;
     }
 
-    try {
-      const sanitizedUrl = supabaseUrl.replace(/\/$/, ""); 
-      console.log(`🔄 Syncing secrets from Supabase [${sanitizedUrl}]...`);
-      
-      supabaseAdmin = createClient(sanitizedUrl, supabaseServiceKey);
-      
-      // Try 'secrets' (lower) first, then 'Secrets' (capital) if it fails
-      let { data, error } = await withTimeout(
-        supabaseAdmin.from('secrets').select('*') as any,
-        10000
-      ).catch(() => ({ data: null, error: { message: "timeout" } })) as any;
+    if (data && data.length > 0) {
+      console.log(`✅ Found ${data.length} secret entries.`);
+      data.forEach((row: any) => {
+        // Try all possible column name variations for 'key'
+        const rawKey = row.key || row.Key || row.name || row.Name || row.id || "";
+        const rawVal = row.value || row.Value || row.api_key || row.apikey || row.secret || row.content || "";
+        
+        const k = rawKey.toString().trim().toUpperCase();
+        const v = rawVal.toString().trim();
 
-      if (error || !data || data.length === 0) {
-        console.log("🔄 Table 'secrets' empty or missing, trying 'Secrets'...");
-        const res2 = await withTimeout(
-          supabaseAdmin.from('Secrets').select('*') as any,
-          10000
-        ).catch(() => ({ data: null, error: null })) as any;
-        if (res2.data && res2.data.length > 0) {
-          data = res2.data;
-          error = null;
+        if (k && v && v.length > 5) {
+          process.env[k] = v;
+          // Aliasing for common SDKs
+          if (k.includes('GROQ')) process.env.GROQ_API_KEY = v;
+          if (k.includes('HUGGING') || k === 'HF_TOKEN') process.env.HUGGINGFACE_API_KEY = v;
+          if (k.includes('OPENROUTER')) process.env.OPENROUTER_API_KEY = v;
+          
+          console.log(`💎 Bonded: ${k} (Type: ${k.split('_')[0]})`);
+          secretSyncStats.keys.push(k);
+          secretSyncStats.count++;
         }
-      }
-      
-      if (error) {
-        secretSyncStats.error = error.message;
-        console.error("❌ Supabase Secrets Sync Error:", error.message);
-        return;
-      }
-
-      if (data && data.length > 0) {
-        console.log(`📊 Found ${data.length} potential secrets in table. Columns detected: [${Object.keys(data[0]).join(', ')}]`);
-        data.forEach((s: any) => {
-          // Robust mapping: check common column names for keys and values
-          // Priority: Never use ID/UUID as a key name if we can help it, as it's almost always the row ID
-          let k = (s.key || s.Key || s.name || s.Name || s.title || s.Title || s.label || "").toString().trim();
-          
-          // If still empty, maybe consider Uuid/id but check if it's a UUID first
-          if (!k) {
-             const potentialK = (s.uuid || s.Uuid || s.id || "").toString().trim();
-             if (potentialK && !/^[0-9a-f-]{36}$/i.test(potentialK)) {
-               k = potentialK;
-             }
-          }
-
-          let v = (s.value || s.Value || s.api_key || s.apikey || s.secret || s.Secret || s.val || s.content || s.token || s.api_token || "").toString().trim();
-          
-          if (k && v && v !== 'api key paste here' && v !== 'placeholder' && v.length > 5) {
-            process.env[k] = v;
-            // Also normalize common HF key names to ensure we find them
-            const upperK = k.toUpperCase().replace(/\s+/g, '_');
-            if (upperK.includes("HUGGING") || upperK === "HF_TOKEN" || upperK === "HF_API_KEY") {
-               process.env.HUGGINGFACE_API_KEY = v;
-               process.env.HF_API_KEY = v;
-               process.env.HF_TOKEN = v;
-            }
-            if (upperK.includes("GROQ")) {
-               process.env.GROQ_API_KEY = v;
-            }
-            if (upperK.includes("OPENROUTER")) {
-               process.env.OPENROUTER_API_KEY = v;
-            }
-            secretSyncStats.keys.push(k);
-            secretSyncStats.count++;
-            console.log(`✅ Bonded secret: ${k} (${v.substring(0, 4)}...${v.substring(v.length - 4)})`);
-          }
-        });
-        console.log("✨ All Supabase secrets processed.");
-        secretSyncStats.success = true;
-      } else {
-        console.warn("⚠️ No secrets found in Supabase table.");
-      }
-    } catch (err) {
-      console.error("❌ Critical Failure during Supabase sync:", err instanceof Error ? err.message : err);
+      });
+      secretSyncStats.success = true;
+    } else {
+      console.warn("📭 No rows found in the 'secrets' table.");
     }
-  } else {
-    console.warn("⚠️ Supabase Credentials missing. Please add VITE_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY to AI Studio Secrets.");
+  } catch (err) {
+    console.error("🌋 Secret sync crash:", err);
   }
 }
 
